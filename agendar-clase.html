@@ -118,7 +118,10 @@ linear-gradient(160deg,#12172b,#1b2140);
 
 <form id="claseForm" style="display:none;margin-top:22px;">
 <div class="step-title">3. Tus datos</div>
+<div class="form-row">
 <div class="form-group"><label>Nombre completo</label><input type="text" id="f_nombre" required placeholder="Tu nombre"></div>
+<div class="form-group"><label>N&uacute;mero de documento</label><input type="text" id="f_documento" required inputmode="numeric" autocomplete="off" placeholder="Ej: 1020304050"></div>
+</div>
 <div class="form-row">
 <div class="form-group"><label>Correo</label><input type="email" id="f_email" required placeholder="tucorreo@ejemplo.com"></div>
 <div class="form-group"><label>Tel&eacute;fono</label><input type="tel" id="f_telefono" placeholder="300 000 0000"></div>
@@ -200,6 +203,24 @@ return `${dias[d.getDay()]} ${d.getDate()} ${meses[d.getMonth()]}`;
 let plataforma = null;
 let franjaSeleccionada = null;
 
+const DATOS_STORAGE_KEY = 'taseca_datos_estudiante';
+
+function cargarDatosGuardados(){
+try{
+const guardados = JSON.parse(localStorage.getItem(DATOS_STORAGE_KEY) || '{}');
+if(guardados.nombre) document.getElementById('f_nombre').value = guardados.nombre;
+if(guardados.documento) document.getElementById('f_documento').value = guardados.documento;
+if(guardados.email) document.getElementById('f_email').value = guardados.email;
+if(guardados.telefono) document.getElementById('f_telefono').value = guardados.telefono;
+}catch(e){ /* localStorage no disponible, se ignora */ }
+}
+
+function guardarDatosGuardados(datos){
+try{ localStorage.setItem(DATOS_STORAGE_KEY, JSON.stringify(datos)); }catch(e){ /* localStorage no disponible, se ignora */ }
+}
+
+cargarDatosGuardados();
+
 function showMsg(text, type){
 const el = document.getElementById('formMsg');
 el.textContent = text;
@@ -259,17 +280,41 @@ document.getElementById('claseForm').style.display = 'block';
 document.getElementById('claseForm').addEventListener('submit', async (e)=>{
 e.preventDefault();
 if(!franjaSeleccionada){ showMsg('Selecciona un horario disponible.', 'error'); return; }
+if(!document.getElementById('f_documento').value.trim()){ showMsg('Escribe tu n\u00famero de documento.', 'error'); return; }
 
 const btn = document.getElementById('submitBtn');
 btn.disabled = true; btn.textContent = 'Confirmando...';
 
-const { data, error } = await sb.rpc('reservar_franja', {
+const datosEstudiante = {
+nombre: document.getElementById('f_nombre').value.trim(),
+documento: document.getElementById('f_documento').value.trim(),
+email: document.getElementById('f_email').value.trim(),
+telefono: document.getElementById('f_telefono').value.trim(),
+};
+guardarDatosGuardados(datosEstudiante);
+
+let { data, error } = await sb.rpc('reservar_franja', {
 p_franja_id: franjaSeleccionada,
-p_nombre: document.getElementById('f_nombre').value.trim(),
-p_email: document.getElementById('f_email').value.trim(),
-p_telefono: document.getElementById('f_telefono').value.trim(),
+p_nombre: datosEstudiante.nombre,
+p_documento: datosEstudiante.documento,
+p_email: datosEstudiante.email,
+p_telefono: datosEstudiante.telefono,
 p_notas: document.getElementById('f_notas').value.trim(),
 });
+
+if(error && error.code === 'PGRST202'){
+// La funci\u00f3n reservar_franja en Supabase todav\u00eda no acepta p_documento.
+// Reintenta sin ese par\u00e1metro para no romper el agendamiento mientras se
+// actualiza la funci\u00f3n en la base de datos (ver supabase_solicitar_clase.sql).
+const retry = await sb.rpc('reservar_franja', {
+p_franja_id: franjaSeleccionada,
+p_nombre: datosEstudiante.nombre,
+p_email: datosEstudiante.email,
+p_telefono: datosEstudiante.telefono,
+p_notas: document.getElementById('f_notas').value.trim(),
+});
+data = retry.data; error = retry.error;
+}
 
 btn.disabled = false; btn.textContent = 'Confirmar clase';
 
